@@ -1,6 +1,10 @@
 import datetime
 import sys
 from pathlib import Path
+
+# Allow running this script directly without installing as a package
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from typing import Optional
 
 import httpx
@@ -30,8 +34,8 @@ def _banner() -> None:
 @app.command()
 def main(
     token: Optional[str] = typer.Option(None, "--token", help="Semgrep API token"),
-    start_date: Optional[datetime.date] = typer.Option(None, "--start-date", help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[datetime.date] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
+    start_date: Optional[str] = typer.Option(None, "--start-date", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
     format: str = typer.Option("json", "--format", help="Output format: json or csv"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path (default: stdout)"),
     no_interactive: bool = typer.Option(False, "--no-interactive", help="Fail if required args are missing"),
@@ -49,6 +53,21 @@ def main(
     if not token:
         console.print("[red]Error:[/red] Token is required", style="bold red")
         raise typer.Exit(code=2)
+
+    parsed_start: Optional[datetime.date] = None
+    parsed_end: Optional[datetime.date] = None
+    if start_date:
+        try:
+            parsed_start = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print("[red]Error:[/red] --start-date must be in YYYY-MM-DD format", style="bold red")
+            raise typer.Exit(code=2)
+    if end_date:
+        try:
+            parsed_end = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print("[red]Error:[/red] --end-date must be in YYYY-MM-DD format", style="bold red")
+            raise typer.Exit(code=2)
 
     client = SemgrepCloudClient(token)
 
@@ -80,8 +99,8 @@ def main(
         raw_findings = client.fetch_findings(
             sync_client,
             deployment_id=deployment_id,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=parsed_start,
+            end_date=parsed_end,
         )
     except Exception as exc:
         sync_client.close()
