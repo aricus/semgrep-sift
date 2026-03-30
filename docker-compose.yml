@@ -1,0 +1,5 @@
+services:
+  semgrep-sift:
+    build: .
+    ports:
+      - "0.0.0.0:8085:8085"
