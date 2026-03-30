@@ -109,6 +109,13 @@ def main(
                 "Generate one at: [cyan]https://semgrep.dev/orgs/-/settings/tokens[/cyan]",
                 style="bold red",
             )
+        elif exc.response.status_code >= 500:
+            console.print(
+                f"[red]Error:[/red] Semgrep's findings API returned a {exc.response.status_code} server error.\n"
+                "This is usually a temporary issue on Semgrep's side.\n"
+                "If it persists, contact support@semgrep.com and reference your deployment.",
+                style="bold red",
+            )
         else:
             console.print(f"[red]Error:[/red] Semgrep API returned {exc.response.status_code}", style="bold red")
         raise typer.Exit(code=1)

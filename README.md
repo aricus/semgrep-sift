@@ -44,6 +44,24 @@ python src/cli.py --help
 | `--preview` | Show first 10 findings as a table |
 | `--help` | Show help message and exit |
 
+## Troubleshooting
+
+### "Invalid Semgrep API token" or 401 errors
+
+semgrep-sift requires a **Semgrep AppSec Platform API token**, not the token from `semgrep login`.
+Generate the correct token at: `https://semgrep.dev/orgs/-/settings/tokens`
+
+### 500 / 502 errors when fetching findings
+
+If you see a message like:
+
+> *Semgrep's findings API returned a 500 server error*
+
+This means Semgrep's own REST API is experiencing an internal error for your deployment. This is outside of semgrep-sift's control.
+**What to do:**
+- Wait a few minutes and try again
+- Contact Semgrep support at `support@semgrep.com` and mention the `/api/v1/deployments/{slug}/findings` endpoint
+
 ## License
 
 MIT

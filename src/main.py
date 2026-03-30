@@ -69,6 +69,15 @@ async def get_findings(request: FindingsRequest):
                 status_code=401,
                 detail="This token cannot access the Semgrep findings API. Please use a Semgrep AppSec Platform API token from https://semgrep.dev/orgs/-/settings/tokens"
             )
+        if exc.response.status_code >= 500:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Semgrep's findings API returned a {exc.response.status_code} server error. "
+                    "This is usually a temporary issue on Semgrep's side. "
+                    "If it persists, contact support@semgrep.com and reference deployment: {deployment_slug}"
+                )
+            )
         raise HTTPException(status_code=502, detail=f"Semgrep API error: {exc.response.status_code}")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch findings: {exc}")
