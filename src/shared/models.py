@@ -8,6 +8,7 @@ class FindingsRequest(BaseModel):
     token: str = Field(..., min_length=1, description="Semgrep API token")
     start_date: Optional[date] = Field(None, description="Inclusive start date")
     end_date: Optional[date] = Field(None, description="Inclusive end date")
+    deployment_slug: Optional[str] = Field(None, description="Deployment slug (defaults to all deployments)")
 
 
 class Finding(BaseModel):

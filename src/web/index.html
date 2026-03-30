@@ -37,6 +37,10 @@
           <input type="date" id="endDate" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
         </div>
       </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Deployment Slug <span class="text-slate-500 font-normal">(optional — leave blank for all)</span></label>
+        <input type="text" id="deploymentSlug" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="your-deployment">
+      </div>
       <button type="submit" id="submitBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg px-4 py-2 transition flex items-center justify-center gap-2">
         <span id="btnText">Fetch Findings</span>
         <svg id="spinner" class="animate-spin h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -47,7 +51,10 @@
 
     <div id="results" class="hidden mt-6 space-y-4">
       <div class="flex items-center justify-between">
-        <div class="text-sm text-slate-300"><span id="countBadge" class="bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded-md font-medium">0</span> findings found</div>
+        <div class="text-sm text-slate-300">
+          <span id="countBadge" class="bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded-md font-medium">0</span> findings found
+          <div id="deploymentInfo" class="text-xs text-slate-400 mt-1"></div>
+        </div>
         <div class="flex gap-2">
           <button id="copyJsonBtn" class="px-3 py-1.5 text-sm rounded-md bg-slate-700 hover:bg-slate-600 transition">Copy JSON</button>
           <button id="downloadJsonBtn" class="px-3 py-1.5 text-sm rounded-md bg-slate-700 hover:bg-slate-600 transition">Download JSON</button>
@@ -122,12 +129,15 @@
       const token = document.getElementById('token').value;
       const startDate = document.getElementById('startDate').value || null;
       const endDate = document.getElementById('endDate').value || null;
+      const deploymentSlug = document.getElementById('deploymentSlug').value || null;
 
       try {
+        const body = { token, start_date: startDate, end_date: endDate };
+        if (deploymentSlug) body.deployment_slug = deploymentSlug;
         const res = await fetch('/api/findings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, start_date: startDate, end_date: endDate })
+          body: JSON.stringify(body)
         });
         const data = await res.json();
         if (!res.ok) {
@@ -135,6 +145,13 @@
         }
         lastPayload = data;
         countBadge.textContent = data.count;
+        const depInfo = document.getElementById('deploymentInfo');
+        if (data.deployment_slugs && data.deployment_slugs.length) {
+          depInfo.textContent = 'Deployments: ' + data.deployment_slugs.join(', ');
+          depInfo.classList.remove('hidden');
+        } else {
+          depInfo.classList.add('hidden');
+        }
         const preview = JSON.stringify(data, null, 2).slice(0, 1000) + '...';
         jsonPreview.textContent = preview;
         Prism.highlightElement(jsonPreview);

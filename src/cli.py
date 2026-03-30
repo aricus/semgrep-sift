@@ -16,7 +16,7 @@ from rich.table import Table
 
 from src.shared.export import findings_to_csv, findings_to_json
 from src.shared.models import Finding
-from src.shared.semgrep_cloud import SemgrepCloudClient
+from src.shared.semgrep_cloud import normalize_finding, SemgrepCloudClient
 
 app = typer.Typer(help="semgrep-sift: Export your Semgrep Cloud findings")
 console = Console()
@@ -40,6 +40,7 @@ def main(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path (default: stdout)"),
     no_interactive: bool = typer.Option(False, "--no-interactive", help="Fail if required args are missing"),
     preview: bool = typer.Option(False, "--preview", help="Show preview table of first 10 findings"),
+    deployment: Optional[str] = typer.Option(None, "--deployment", help="Deployment slug (omit to fetch from all deployments)"),
 ) -> None:
     if not sys.argv[1:]:
         _banner()
@@ -71,10 +72,10 @@ def main(
 
     client = SemgrepCloudClient(token)
 
-    with console.status("[bold indigo]Fetching deployment...") as status:
+    with console.status("[bold indigo]Fetching deployments...") as status:
         sync_client = httpx.Client(timeout=60.0)
         try:
-            deployment = client.get_deployment(sync_client)
+            deployments = client.list_deployments(sync_client)
         except httpx.HTTPStatusError as exc:
             sync_client.close()
             if exc.response.status_code == 401:
@@ -91,42 +92,52 @@ def main(
             console.print(f"[red]Error:[/red] Could not reach Semgrep Cloud: {exc}", style="bold red")
             raise typer.Exit(code=1)
 
-    deployment_slug = str(deployment["slug"])
-    status.update(f"[bold indigo]Fetching findings for deployment {deployment_slug}...")
+    if deployment:
+        target_deployments = [d for d in deployments if d.get("slug") == deployment]
+        if not target_deployments:
+            console.print(f"[red]Error:[/red] Deployment '{deployment}' not found. Available: {', '.join(d.get('slug', '') for d in deployments)}", style="bold red")
+            sync_client.close()
+            raise typer.Exit(code=2)
+    else:
+        target_deployments = deployments
 
-    try:
-        raw_findings = client.fetch_findings(
-            sync_client,
-            deployment_slug=deployment_slug,
-            start_date=parsed_start,
-            end_date=parsed_end,
-        )
-    except httpx.HTTPStatusError as exc:
-        sync_client.close()
-        if exc.response.status_code == 401:
-            console.print(
-                "[red]Error:[/red] This token cannot access the Semgrep findings API. Please use a Semgrep AppSec Platform API token.\n"
-                "Generate one at: [cyan]https://semgrep.dev/orgs/-/settings/tokens[/cyan]",
-                style="bold red",
+    raw_findings: list[dict] = []
+    for dep in target_deployments:
+        deployment_slug = str(dep["slug"])
+        status.update(f"[bold indigo]Fetching findings for deployment {deployment_slug}...")
+        try:
+            batch = client.fetch_findings(
+                sync_client,
+                deployment_slug=deployment_slug,
+                start_date=parsed_start,
+                end_date=parsed_end,
             )
-        elif exc.response.status_code >= 500:
-            console.print(
-                f"[red]Error:[/red] Semgrep's findings API returned a {exc.response.status_code} server error.\n"
-                "This is usually a temporary issue on Semgrep's side.\n"
-                "If it persists, contact support@semgrep.com and reference your deployment.",
-                style="bold red",
-            )
-        else:
-            console.print(f"[red]Error:[/red] Semgrep API returned {exc.response.status_code}", style="bold red")
-        raise typer.Exit(code=1)
-    except Exception as exc:
-        sync_client.close()
-        console.print(f"[red]Error:[/red] Failed to fetch findings: {exc}", style="bold red")
-        raise typer.Exit(code=1)
-    finally:
-        sync_client.close()
+            raw_findings.extend(batch)
+        except httpx.HTTPStatusError as exc:
+            sync_client.close()
+            if exc.response.status_code == 401:
+                console.print(
+                    "[red]Error:[/red] This token cannot access the Semgrep findings API. Please use a Semgrep AppSec Platform API token.\n"
+                    "Generate one at: [cyan]https://semgrep.dev/orgs/-/settings/tokens[/cyan]",
+                    style="bold red",
+                )
+            elif exc.response.status_code >= 500:
+                console.print(
+                    f"[red]Error:[/red] Semgrep's findings API returned a {exc.response.status_code} server error for deployment {deployment_slug}.\n"
+                    "This is usually a temporary issue on Semgrep's side.\n"
+                    "If it persists, contact support@semgrep.com and reference your deployment.",
+                    style="bold red",
+                )
+            else:
+                console.print(f"[red]Error:[/red] Semgrep API returned {exc.response.status_code} for deployment {deployment_slug}", style="bold red")
+            raise typer.Exit(code=1)
+        except Exception as exc:
+            sync_client.close()
+            console.print(f"[red]Error:[/red] Failed to fetch findings for deployment {deployment_slug}: {exc}", style="bold red")
+            raise typer.Exit(code=1)
 
-    findings = [Finding(**f) for f in raw_findings]
+    sync_client.close()
+    findings = [Finding(**normalize_finding(f)) for f in raw_findings]
 
     if format == "csv":
         content = findings_to_csv(findings)
