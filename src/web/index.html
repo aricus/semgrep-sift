@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>semgrep-sift</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' }
+  </script>
+</head>
+<body class="bg-gradient-to-br from-slate-900 to-slate-800 min-h-screen flex items-center justify-center p-6 text-slate-100">
+  <div class="w-full max-w-2xl bg-slate-800/80 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl p-8">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-10 h-10 rounded-lg bg-indigo-500 flex items-center justify-center text-xl font-bold">🔍</div>
+      <div>
+        <h1 class="text-2xl font-bold">semgrep-sift</h1>
+        <p class="text-slate-400 text-sm">Export your Semgrep Cloud findings</p>
+      </div>
+    </div>
+
+    <form id="siftForm" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Semgrep API Token</label>
+        <input type="password" id="token" required class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="sgp_...">
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Start Date</label>
+          <input type="date" id="startDate" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">End Date</label>
+          <input type="date" id="endDate" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+      </div>
+      <button type="submit" id="submitBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg px-4 py-2 transition flex items-center justify-center gap-2">
+        <span id="btnText">Fetch Findings</span>
+        <svg id="spinner" class="animate-spin h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+      </button>
+    </form>
+
+    <div id="errorBox" class="hidden mt-6 p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-sm"></div>
+
+    <div id="results" class="hidden mt-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="text-sm text-slate-300"><span id="countBadge" class="bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded-md font-medium">0</span> findings found</div>
+        <div class="flex gap-2">
+          <button id="copyJsonBtn" class="px-3 py-1.5 text-sm rounded-md bg-slate-700 hover:bg-slate-600 transition">Copy JSON</button>
+          <button id="downloadJsonBtn" class="px-3 py-1.5 text-sm rounded-md bg-slate-700 hover:bg-slate-600 transition">Download JSON</button>
+          <button id="downloadCsvBtn" class="px-3 py-1.5 text-sm rounded-md bg-emerald-600 hover:bg-emerald-500 text-white transition">Download CSV</button>
+        </div>
+      </div>
+      <div class="bg-slate-900 rounded-lg border border-slate-700 overflow-hidden">
+        <div class="px-4 py-2 border-b border-slate-700 text-xs text-slate-400">Preview (first 1,000 chars)</div>
+        <pre class="m-0 max-h-96 overflow-auto"><code id="jsonPreview" class="language-json text-sm"></code></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('siftForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const btnText = document.getElementById('btnText');
+    const spinner = document.getElementById('spinner');
+    const errorBox = document.getElementById('errorBox');
+    const results = document.getElementById('results');
+    const countBadge = document.getElementById('countBadge');
+    const jsonPreview = document.getElementById('jsonPreview');
+
+    let lastPayload = null;
+
+    function setLoading(loading) {
+      submitBtn.disabled = loading;
+      btnText.textContent = loading ? 'Fetching...' : 'Fetch Findings';
+      spinner.classList.toggle('hidden', !loading);
+    }
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.remove('hidden');
+      results.classList.add('hidden');
+    }
+
+    function clearError() {
+      errorBox.classList.add('hidden');
+      errorBox.textContent = '';
+    }
+
+    function downloadFile(filename, content, type) {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function jsonToCsv(jsonFindings) {
+      if (!jsonFindings.length) return '';
+      const keys = Object.keys(jsonFindings[0]);
+      const csvRows = [keys.join(',')];
+      for (const row of jsonFindings) {
+        csvRows.push(keys.map(k => {
+          const val = row[k] ?? '';
+          const str = String(val).replace(/"/g, '\\"');
+          return `"${str}"`;
+        }).join(','));
+      }
+      return csvRows.join('\n');
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearError();
+      setLoading(true);
+
+      const token = document.getElementById('token').value;
+      const startDate = document.getElementById('startDate').value || null;
+      const endDate = document.getElementById('endDate').value || null;
+
+      try {
+        const res = await fetch('/api/findings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, start_date: startDate, end_date: endDate })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || `Error ${res.status}`);
+        }
+        lastPayload = data;
+        countBadge.textContent = data.count;
+        const preview = JSON.stringify(data, null, 2).slice(0, 1000) + '...';
+        jsonPreview.textContent = preview;
+        Prism.highlightElement(jsonPreview);
+        results.classList.remove('hidden');
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    document.getElementById('copyJsonBtn').addEventListener('click', () => {
+      if (!lastPayload) return;
+      navigator.clipboard.writeText(JSON.stringify(lastPayload, null, 2));
+    });
+
+    document.getElementById('downloadJsonBtn').addEventListener('click', () => {
+      if (!lastPayload) return;
+      downloadFile('semgrep-findings.json', JSON.stringify(lastPayload, null, 2), 'application/json');
+    });
+
+    document.getElementById('downloadCsvBtn').addEventListener('click', () => {
+      if (!lastPayload) return;
+      const csv = jsonToCsv(lastPayload.findings);
+      downloadFile('semgrep-findings.csv', csv, 'text/csv');
+    });
+  </script>
+</body>
+</html>
