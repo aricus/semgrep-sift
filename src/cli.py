@@ -71,14 +71,18 @@ def main(
 
     client = SemgrepCloudClient(token)
 
-    with console.status("[bold indigo]Fetching deployments...") as status:
+    with console.status("[bold indigo]Fetching deployment...") as status:
         sync_client = httpx.Client(timeout=60.0)
         try:
-            deployments = client.get_deployments(sync_client)
+            deployment = client.get_deployment(sync_client)
         except httpx.HTTPStatusError as exc:
             sync_client.close()
             if exc.response.status_code == 401:
-                console.print("[red]Error:[/red] Invalid Semgrep API token", style="bold red")
+                console.print(
+                    "[red]Error:[/red] Invalid Semgrep API token. semgrep-sift requires a Semgrep AppSec Platform API token (not a CLI login token).\n"
+                    "Generate one at: [cyan]https://semgrep.dev/orgs/-/settings/tokens[/cyan]",
+                    style="bold red",
+                )
             else:
                 console.print(f"[red]Error:[/red] Semgrep API returned {exc.response.status_code}", style="bold red")
             raise typer.Exit(code=1)
@@ -87,21 +91,27 @@ def main(
             console.print(f"[red]Error:[/red] Could not reach Semgrep Cloud: {exc}", style="bold red")
             raise typer.Exit(code=1)
 
-    if not deployments:
-        sync_client.close()
-        console.print("[yellow]Warning:[/yellow] No deployments found for this token", style="bold yellow")
-        raise typer.Exit(code=0)
-
-    deployment_id = str(deployments[0]["id"])
-    status.update(f"[bold indigo]Fetching findings for deployment {deployment_id}...")
+    deployment_slug = str(deployment["slug"])
+    status.update(f"[bold indigo]Fetching findings for deployment {deployment_slug}...")
 
     try:
         raw_findings = client.fetch_findings(
             sync_client,
-            deployment_id=deployment_id,
+            deployment_slug=deployment_slug,
             start_date=parsed_start,
             end_date=parsed_end,
         )
+    except httpx.HTTPStatusError as exc:
+        sync_client.close()
+        if exc.response.status_code == 401:
+            console.print(
+                "[red]Error:[/red] This token cannot access the Semgrep findings API. Please use a Semgrep AppSec Platform API token.\n"
+                "Generate one at: [cyan]https://semgrep.dev/orgs/-/settings/tokens[/cyan]",
+                style="bold red",
+            )
+        else:
+            console.print(f"[red]Error:[/red] Semgrep API returned {exc.response.status_code}", style="bold red")
+        raise typer.Exit(code=1)
     except Exception as exc:
         sync_client.close()
         console.print(f"[red]Error:[/red] Failed to fetch findings: {exc}", style="bold red")

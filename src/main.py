@@ -40,29 +40,36 @@ async def get_findings(request: FindingsRequest):
 
     try:
         sync_client = httpx.Client(timeout=60.0)
-        deployments = client.get_deployments(sync_client)
+        deployment = client.get_deployment(sync_client)
         sync_client.close()
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 401:
-            raise HTTPException(status_code=401, detail="Invalid Semgrep API token")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid Semgrep API token. Note: semgrep-sift requires a Semgrep AppSec Platform API token (not a CLI login token). Generate one at https://semgrep.dev/orgs/-/settings/tokens"
+            )
         raise HTTPException(status_code=502, detail=f"Semgrep API error: {exc.response.status_code}")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach Semgrep Cloud: {exc}")
 
-    if not deployments:
-        raise HTTPException(status_code=404, detail="No deployments found for this token")
-
-    deployment_id = str(deployments[0]["id"])
+    deployment_slug = str(deployment["slug"])
 
     try:
         sync_client = httpx.Client(timeout=60.0)
         raw_findings = client.fetch_findings(
             sync_client,
-            deployment_id=deployment_id,
+            deployment_slug=deployment_slug,
             start_date=request.start_date,
             end_date=request.end_date,
         )
         sync_client.close()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 401:
+            raise HTTPException(
+                status_code=401,
+                detail="This token cannot access the Semgrep findings API. Please use a Semgrep AppSec Platform API token from https://semgrep.dev/orgs/-/settings/tokens"
+            )
+        raise HTTPException(status_code=502, detail=f"Semgrep API error: {exc.response.status_code}")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch findings: {exc}")
 

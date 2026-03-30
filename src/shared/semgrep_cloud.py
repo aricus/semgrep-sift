@@ -1,4 +1,5 @@
 import datetime
+import time
 from typing import Any, Optional
 
 import httpx
@@ -22,14 +23,18 @@ class SemgrepCloudClient:
         response.raise_for_status()
         return response.json()
 
-    def get_deployments(self, client: httpx.Client) -> list[dict]:
-        data = self._get(client, "/api/v1/deployments")
-        return data.get("deployments", [])
+    def get_deployment(self, client: httpx.Client) -> dict:
+        """Fetch current deployment using the agent endpoint (works with CLI tokens)."""
+        data = self._get(client, "/api/agent/deployments/current")
+        deployment = data.get("deployment")
+        if not deployment:
+            raise ValueError("No deployment found for this token")
+        return deployment
 
     def fetch_findings(
         self,
         client: httpx.Client,
-        deployment_id: str,
+        deployment_slug: str,
         start_date: Optional[datetime.date] = None,
         end_date: Optional[datetime.date] = None,
         page_size: int = 100,
@@ -37,19 +42,24 @@ class SemgrepCloudClient:
         findings: list[dict] = []
         page = 0
 
-        while True:
-            params: dict[str, Any] = {
-                "deployment_id": deployment_id,
-                "page": page,
-                "size": page_size,
-            }
-            if start_date:
-                params["start_date"] = start_date.isoformat()
-            if end_date:
-                params["end_date"] = end_date.isoformat()
+        params: dict[str, Any] = {
+            "page": page,
+            "page_size": page_size,
+            "dedup": "true",
+        }
+        if start_date:
+            params["since"] = time.mktime(start_date.timetuple())
 
-            data = self._get(client, "/api/v1/findings", params=params)
-            batch = data.get("findings", [])
+        while True:
+            params["page"] = page
+            data = self._get(client, f"/api/v1/deployments/{deployment_slug}/findings", params=params)
+
+            # The API returns a list directly
+            if not isinstance(data, list):
+                batch = data.get("findings", [])
+            else:
+                batch = data
+
             if not batch:
                 break
 
@@ -57,5 +67,21 @@ class SemgrepCloudClient:
             if len(batch) < page_size:
                 break
             page += 1
+
+        # Client-side end_date filtering if provided
+        if end_date and findings:
+            end_timestamp = time.mktime(end_date.timetuple())
+            filtered = []
+            for f in findings:
+                relevant_since = f.get("relevant_since")
+                if relevant_since is not None:
+                    try:
+                        if float(relevant_since) <= end_timestamp:
+                            filtered.append(f)
+                    except (ValueError, TypeError):
+                        filtered.append(f)
+                else:
+                    filtered.append(f)
+            findings = filtered
 
         return findings
